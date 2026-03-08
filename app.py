@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 
@@ -187,16 +187,64 @@ async def get_stream(presentation_url: str, bitrate: int = 192):
     best = min(assets, key=score)
     asset_url = best["url"]
 
-    # Resolve the assetlinks redirect to get the actual CDN URL
-    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=False, timeout=10) as client:
+    # Resolve the assetlinks redirect to get the actual CDN URL.
+    # Must include Referer so DR's API grants the redirect.
+    dr_headers = {**HEADERS, "Referer": "https://www.dr.dk/", "Origin": "https://www.dr.dk"}
+    async with httpx.AsyncClient(headers=dr_headers, follow_redirects=False, timeout=10) as client:
         resp = await client.get(asset_url)
 
     if resp.status_code in (301, 302, 303, 307, 308):
         cdn_url = resp.headers.get("location", asset_url)
+    elif resp.status_code >= 400:
+        raise HTTPException(resp.status_code, "Audio not available for this episode")
     else:
         cdn_url = asset_url
 
     return {"url": cdn_url, "format": best.get("format"), "bitrate": best.get("bitrate")}
+
+
+@app.get("/api/proxy-stream")
+async def proxy_stream(presentation_url: str, bitrate: int = 192):
+    """
+    Fetch and stream audio server-side so the browser never needs to contact
+    DR's CDN directly (avoids Referer / geo 403 errors).
+    """
+    try:
+        assets = await fetch_episode_audio(presentation_url)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch episode: {e}")
+
+    if not assets:
+        raise HTTPException(404, "No audio assets found for this episode")
+
+    def score(a):
+        fmt_score = 0 if a.get("format") == "mp3" else 1
+        bitrate_diff = abs(a.get("bitrate", 0) - bitrate)
+        return (fmt_score, bitrate_diff)
+
+    best = min(assets, key=score)
+    asset_url = best["url"]
+    fmt = best.get("format", "mp3")
+
+    dr_headers = {**HEADERS, "Referer": "https://www.dr.dk/", "Origin": "https://www.dr.dk"}
+
+    # Probe the URL to resolve all redirects and catch early 4xx errors
+    async with httpx.AsyncClient(headers=dr_headers, follow_redirects=True, timeout=20) as client:
+        probe = await client.head(asset_url)
+
+    if probe.status_code >= 400:
+        raise HTTPException(probe.status_code, "Audio not available for this episode")
+
+    final_url = str(probe.url)
+
+    async def generate():
+        async with httpx.AsyncClient(headers=dr_headers, follow_redirects=True, timeout=None) as client:
+            async with client.stream("GET", final_url) as resp:
+                async for chunk in resp.aiter_bytes(chunk_size=16384):
+                    yield chunk
+
+    content_type = "audio/mpeg" if fmt == "mp3" else "audio/mp4"
+    return StreamingResponse(generate(), media_type=content_type)
 
 
 if __name__ == "__main__":

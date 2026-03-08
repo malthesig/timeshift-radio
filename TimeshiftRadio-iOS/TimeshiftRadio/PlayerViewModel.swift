@@ -6,117 +6,102 @@ import SwiftUI
 @MainActor
 class PlayerViewModel: ObservableObject {
 
-    // MARK: - Published state
     @Published var nowPlaying: NowPlayingResponse?
     @Published var isLoading = false
     @Published var isAudioLoading = false
     @Published var isPlaying = false
     @Published var errorMessage: String?
-
     @Published var selectedChannel: Channel = Channel.all[0]
     @Published var userTimezone: String = TimeZone.current.identifier
 
-    // MARK: - Private
     private var player: AVPlayer?
+    private var playerEndObserver: Any?
     private var refreshTask: Task<Void, Never>?
     private var currentShowID: String?
+    private var queuedNextShow: Show?
 
-    // MARK: - Computed helpers
     var currentShow: Show? { nowPlaying?.show }
     var targetCphTime: String { nowPlaying?.targetCphTime ?? "" }
     var scheduleDate: String { nowPlaying?.scheduleDate ?? "" }
     var localTime: String { nowPlaying?.user?.localTime ?? "" }
 
-    // MARK: - Lifecycle
+    init() { setupAudioSession(); setupRemoteCommands() }
 
-    init() {
-        setupAudioSession()
-        setupRemoteCommands()
-    }
-
-    func start() {
-        Task { await refresh() }
-        scheduleAutoRefresh()
-    }
-
-    // MARK: - Data loading
+    func start() { Task { await refresh() }; scheduleAutoRefresh() }
 
     func refresh() async {
-        isLoading = true
-        errorMessage = nil
+        isLoading = true; errorMessage = nil
         do {
-            let response = try await RadioAPI.fetchNowPlaying(
-                channel: selectedChannel.slug,
-                timezone: userTimezone
-            )
+            let response = try await RadioAPI.fetchNowPlaying(channel: selectedChannel.slug, timezone: userTimezone)
             nowPlaying = response
-
-            // Load audio only if show changed
-            if let show = response.show,
-               show.isAvailableOnDemand == true,
-               show.id != currentShowID {
+            queuedNextShow = response.nextShow
+            if let show = response.show, show.isAvailableOnDemand == true, show.id != currentShowID {
                 currentShowID = show.id
                 await loadAudio(for: show)
             } else if response.show?.isAvailableOnDemand != true {
                 stopAudio()
             }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        } catch { errorMessage = error.localizedDescription }
         isLoading = false
     }
 
     func switchChannel(to channel: Channel) {
-        selectedChannel = channel
-        currentShowID = nil
-        stopAudio()
-        Task { await refresh() }
+        selectedChannel = channel; currentShowID = nil; queuedNextShow = nil
+        stopAudio(); Task { await refresh() }
     }
-
-    // MARK: - Audio
 
     private func loadAudio(for show: Show) async {
         guard let presentationURL = show.presentationUrl else { return }
         isAudioLoading = true
         do {
             let stream = try await RadioAPI.fetchStreamURL(presentationURL: presentationURL)
-            guard let url = URL(string: stream.url) else { return }
+            guard let url = URL(string: stream.url) else { isAudioLoading = false; return }
             play(url: url, show: show)
-        } catch {
-            // Audio unavailable — silent fail
-        }
+        } catch {}
         isAudioLoading = false
     }
 
     private func play(url: URL, show: Show) {
+        if let obs = playerEndObserver { NotificationCenter.default.removeObserver(obs) }
         player?.pause()
         let item = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: item)
         player?.play()
         isPlaying = true
         updateNowPlayingInfo(show: show)
+        playerEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in Task { @MainActor [weak self] in await self?.playNextShow() } }
+    }
+
+    private func playNextShow() async {
+        guard let next = queuedNextShow else { await refresh(); return }
+        guard next.isAvailableOnDemand == true else { currentShowID = nil; await refresh(); return }
+        nowPlaying = NowPlayingResponse(status: nowPlaying?.status ?? "ok", channel: nowPlaying?.channel,
+            targetCphTime: nowPlaying?.targetCphTime, scheduleDate: nowPlaying?.scheduleDate,
+            show: next, nextShow: nil, user: nowPlaying?.user)
+        currentShowID = next.id; queuedNextShow = nil
+        await loadAudio(for: next)
+        Task {
+            if let ch = nowPlaying?.channel,
+               let updated = try? await RadioAPI.fetchNowPlaying(channel: ch, timezone: userTimezone) {
+                queuedNextShow = updated.nextShow
+            }
+        }
     }
 
     func togglePlayPause() {
         guard let player else { return }
-        if isPlaying {
-            player.pause()
-            isPlaying = false
-        } else {
-            player.play()
-            isPlaying = true
-        }
+        isPlaying ? player.pause() : player.play()
+        isPlaying.toggle()
         MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
     }
 
     private func stopAudio() {
-        player?.pause()
-        player = nil
-        isPlaying = false
+        if let obs = playerEndObserver { NotificationCenter.default.removeObserver(obs); playerEndObserver = nil }
+        player?.pause(); player = nil; isPlaying = false
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
-
-    // MARK: - Now Playing Info (lock screen)
 
     private func updateNowPlayingInfo(show: Show) {
         var info: [String: Any] = [
@@ -126,12 +111,9 @@ class PlayerViewModel: ObservableObject {
             MPNowPlayingInfoPropertyPlaybackRate: 1.0,
         ]
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-
-        // Load artwork async
         if let artURL = show.squareImageURL {
             Task {
-                if let data = try? Data(contentsOf: artURL),
-                   let uiImage = UIImage(data: data) {
+                if let data = try? Data(contentsOf: artURL), let uiImage = UIImage(data: data) {
                     let artwork = MPMediaItemArtwork(boundsSize: uiImage.size) { _ in uiImage }
                     info[MPMediaItemPropertyArtwork] = artwork
                     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
@@ -140,33 +122,17 @@ class PlayerViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Setup
-
     private func setupAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Audio session error: \(error)")
-        }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        try? AVAudioSession.sharedInstance().setActive(true)
     }
 
     private func setupRemoteCommands() {
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in
-            self?.player?.play()
-            self?.isPlaying = true
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            self?.player?.pause()
-            self?.isPlaying = false
-            return .success
-        }
-        center.stopCommand.addTarget { [weak self] _ in
-            self?.stopAudio()
-            return .success
-        }
+        let c = MPRemoteCommandCenter.shared()
+        c.playCommand.addTarget { [weak self] _ in self?.player?.play(); self?.isPlaying = true; return .success }
+        c.pauseCommand.addTarget { [weak self] _ in self?.player?.pause(); self?.isPlaying = false; return .success }
+        c.nextTrackCommand.addTarget { [weak self] _ in Task { @MainActor [weak self] in await self?.playNextShow() }; return .success }
+        c.stopCommand.addTarget { [weak self] _ in self?.stopAudio(); return .success }
     }
 
     private func scheduleAutoRefresh() {
@@ -174,9 +140,7 @@ class PlayerViewModel: ObservableObject {
         refreshTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3 * 60 * 1_000_000_000)
-                if !Task.isCancelled {
-                    await refresh()
-                }
+                if !Task.isCancelled { await refresh() }
             }
         }
     }

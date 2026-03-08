@@ -28,12 +28,14 @@ struct NowPlayingResponse: Codable {
     let targetCphTime: String?
     let scheduleDate: String?
     let show: Show?
+    let nextShow: Show?
     let user: UserInfo?
 
     enum CodingKeys: String, CodingKey {
         case status, channel, show, user
         case targetCphTime = "target_cph_time"
         case scheduleDate = "schedule_date"
+        case nextShow = "next_show"
     }
 }
 

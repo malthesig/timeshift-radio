@@ -427,20 +427,14 @@
 
     // Only reload audio if show changed
     if (!sameShow) {
-      audioBar.style.display = 'block';
-      audioPlayer.src = '';
       currentShowId = show.id;
       currentStreamUrl = null;
+      audioPlayer.src = '';
+      audioBar.style.display = 'block';
 
-      // Resolve stream URL
-      try {
-        const sRes = await fetch(`/api/stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`);
-        const sData = await sRes.json();
-        currentStreamUrl = sData.url;
-        audioPlayer.src = currentStreamUrl;
-      } catch(e) {
-        audioBar.style.display = 'none';
-      }
+      // Point directly at the server-side proxy — no extra fetch needed,
+      // no raw CDN URL exposed to the browser (avoids 403 issues).
+      audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
     }
   }
 
