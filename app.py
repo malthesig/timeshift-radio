@@ -74,6 +74,16 @@ def find_show_at_time(items: list[dict], target_utc: datetime) -> Optional[dict]
     return None
 
 
+def find_next_show(items: list[dict], current_show: dict) -> Optional[dict]:
+    """Find the show immediately following the current one."""
+    current_end = datetime.fromisoformat(current_show["endTime"])
+    for item in items:
+        start = datetime.fromisoformat(item["startTime"])
+        if start >= current_end:
+            return item
+    return None
+
+
 def wall_clock_as_copenhagen(user_dt: datetime) -> datetime:
     """
     Take the user's wall-clock time (H:MM) and return a datetime representing
@@ -125,21 +135,27 @@ async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles")
             "schedule_date": str(schedule_date),
         }
 
+    def show_dict(s: dict) -> dict:
+        return {
+            "title": s.get("title"),
+            "description": s.get("description"),
+            "startTime": s.get("startTime"),
+            "endTime": s.get("endTime"),
+            "isAvailableOnDemand": s.get("isAvailableOnDemand"),
+            "presentationUrl": s.get("presentationUrl"),
+            "imageAssets": s.get("imageAssets", []),
+            "id": s.get("id"),
+        }
+
+    next_show = find_next_show(items, show)
+
     return {
         "status": "ok",
         "channel": channel,
         "target_cph_time": target_cph.strftime("%H:%M"),
         "schedule_date": str(schedule_date),
-        "show": {
-            "title": show.get("title"),
-            "description": show.get("description"),
-            "startTime": show.get("startTime"),
-            "endTime": show.get("endTime"),
-            "isAvailableOnDemand": show.get("isAvailableOnDemand"),
-            "presentationUrl": show.get("presentationUrl"),
-            "imageAssets": show.get("imageAssets", []),
-            "id": show.get("id"),
-        },
+        "show": show_dict(show),
+        "next_show": show_dict(next_show) if next_show else None,
         "user": {
             "timezone": user_tz,
             "localTime": now_local.strftime("%H:%M"),
