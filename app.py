@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -126,6 +126,17 @@ async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles")
         raise HTTPException(502, f"Failed to fetch schedule: {e}")
 
     show = find_show_at_time(items, target_utc)
+
+    # Nothing found on today's schedule — a show may have started before midnight
+    # and still be airing now (e.g. 23:45 start, 00:30 end). Check yesterday too.
+    if not show:
+        try:
+            prev_items = await fetch_schedule(channel, schedule_date - timedelta(days=1))
+            show = find_show_at_time(prev_items, target_utc)
+            if show:
+                items = prev_items  # use yesterday's list for next_show lookup too
+        except Exception:
+            pass
 
     if not show:
         return {
