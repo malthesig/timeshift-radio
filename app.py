@@ -23,7 +23,7 @@ DR_CHANNELS = [
     {"slug": "p4",       "name": "P4",         "description": "Regional radio"},
     {"slug": "p5",       "name": "P5",         "description": "Klassiske hits"},
     {"slug": "p6beat",   "name": "P6 Beat",    "description": "Alternativ musik"},
-    {"slug": "p7mix",    "name": "P7 Mix",     "description": "Nostalgisk musik"},
+    # P7 Mix removed: no schedule URL on DR LYD (live-only stream, no on-demand)
     {"slug": "p8jazz",   "name": "P8 Jazz",    "description": "Jazz"},
 ]
 
