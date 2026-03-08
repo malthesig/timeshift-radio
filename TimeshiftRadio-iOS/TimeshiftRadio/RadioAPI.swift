@@ -15,8 +15,7 @@ enum APIError: LocalizedError {
 }
 
 class RadioAPI {
-    // ⚠️ Update this URL after deploying to Render
-    static var baseURL = "https://timeshift-radio.onrender.com"
+    static var baseURL = "https://timeshift-radio.fly.dev"
 
     static func fetchNowPlaying(channel: String, timezone: String) async throws -> NowPlayingResponse {
         var comps = URLComponents(string: "\(baseURL)/api/now")!
