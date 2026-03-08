@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 
@@ -217,8 +217,10 @@ async def get_stream(presentation_url: str, bitrate: int = 192):
 @app.get("/api/proxy-stream")
 async def proxy_stream(presentation_url: str, bitrate: int = 192):
     """
-    Fetch and stream audio server-side so the browser never needs to contact
-    DR's CDN directly (avoids Referer / geo 403 errors).
+    Resolve the assetlinks URL server-side (requires EU IP + Referer),
+    then redirect the browser directly to the Akamai CDN URL.
+    This gives the browser proper Content-Length / range support so the
+    audio player shows duration and seeking works (no "Live Broadcast").
     """
     try:
         assets = await fetch_episode_audio(presentation_url)
@@ -235,27 +237,23 @@ async def proxy_stream(presentation_url: str, bitrate: int = 192):
 
     best = min(assets, key=score)
     asset_url = best["url"]
-    fmt = best.get("format", "mp3")
 
     dr_headers = {**HEADERS, "Referer": "https://www.dr.dk/", "Origin": "https://www.dr.dk"}
 
-    # Probe the URL to resolve all redirects and catch early 4xx errors
-    async with httpx.AsyncClient(headers=dr_headers, follow_redirects=True, timeout=20) as client:
-        probe = await client.head(asset_url)
+    # Resolve the assetlinks redirect to get the real Akamai CDN URL
+    async with httpx.AsyncClient(headers=dr_headers, follow_redirects=False, timeout=20) as client:
+        resp = await client.get(asset_url)
 
-    if probe.status_code >= 400:
-        raise HTTPException(probe.status_code, "Audio not available for this episode")
+    if resp.status_code in (301, 302, 303, 307, 308):
+        cdn_url = resp.headers.get("location", asset_url)
+    elif resp.status_code >= 400:
+        raise HTTPException(resp.status_code, "Audio not available for this episode")
+    else:
+        cdn_url = asset_url
 
-    final_url = str(probe.url)
-
-    async def generate():
-        async with httpx.AsyncClient(headers=dr_headers, follow_redirects=True, timeout=None) as client:
-            async with client.stream("GET", final_url) as resp:
-                async for chunk in resp.aiter_bytes(chunk_size=16384):
-                    yield chunk
-
-    content_type = "audio/mpeg" if fmt == "mp3" else "audio/mp4"
-    return StreamingResponse(generate(), media_type=content_type)
+    # Redirect browser straight to the CDN — no proxying, no timeouts,
+    # proper Content-Length so the player shows duration instead of "Live Broadcast"
+    return RedirectResponse(cdn_url, status_code=302)
 
 
 if __name__ == "__main__":
