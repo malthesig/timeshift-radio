@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python3 -m uvicorn app:app --port 8888 --loop asyncio --http h11)",
+      "Bash(curl -s http://localhost:8888/)",
+      "Bash(curl -s \"http://localhost:8888/api/now?channel=p1&user_tz=America/Los_Angeles\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:8888/api/stream?presentation_url=https://www.dr.dk/lyd/p1/svingdoeren/svingdoeren-2026/reality-politik-arnes-ansigt-og-blokpolitik-11162614106\")",
+      "Bash(git --version)",
+      "Bash(gh --version)"
+    ]
+  }
+}

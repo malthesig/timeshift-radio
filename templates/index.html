@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DR Timeshift Radio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f0f13;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #fff;
+    }
+
+    header p {
+      color: #888;
+      margin-top: 0.4rem;
+      font-size: 0.95rem;
+    }
+
+    .tag {
+      display: inline-block;
+      background: #e2001a;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-bottom: 0.6rem;
+    }
+
+    .controls {
+      width: 100%;
+      max-width: 600px;
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .controls select {
+      flex: 1;
+      min-width: 180px;
+      background: #1e1e28;
+      border: 1px solid #333;
+      color: #e8e8f0;
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+    }
+
+    .controls select:focus { outline: none; border-color: #e2001a; }
+
+    .player-card {
+      width: 100%;
+      max-width: 600px;
+      background: #1e1e28;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid #2a2a38;
+    }
+
+    .now-playing-header {
+      background: #16161e;
+      padding: 0.9rem 1.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      border-bottom: 1px solid #2a2a38;
+    }
+
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #e2001a;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .now-playing-header span {
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #aaa;
+    }
+
+    .time-display {
+      margin-left: auto;
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .show-info {
+      padding: 1.5rem;
+      display: flex;
+      gap: 1.2rem;
+      align-items: flex-start;
+    }
+
+    .show-thumb {
+      width: 90px;
+      height: 90px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #2a2a38;
+      flex-shrink: 0;
+    }
+
+    .show-thumb-placeholder {
+      width: 90px;
+      height: 90px;
+      border-radius: 10px;
+      background: #2a2a38;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+    }
+
+    .show-details { flex: 1; min-width: 0; }
+
+    .show-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.4rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .show-desc {
+      font-size: 0.85rem;
+      color: #888;
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .show-time {
+      font-size: 0.78rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+
+    .unavailable-badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      background: #2a2a38;
+      color: #888;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+    }
+
+    .audio-bar {
+      padding: 1rem 1.5rem 1.5rem;
+      border-top: 1px solid #2a2a38;
+    }
+
+    audio {
+      width: 100%;
+      height: 40px;
+      border-radius: 8px;
+    }
+
+    audio::-webkit-media-controls-panel {
+      background: #2a2a38;
+    }
+
+    .play-btn {
+      width: 100%;
+      padding: 0.8rem;
+      background: #e2001a;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .play-btn:hover { background: #c8001a; }
+    .play-btn:disabled { background: #444; cursor: not-allowed; }
+
+    .state-message {
+      text-align: center;
+      padding: 2.5rem 1.5rem;
+      color: #666;
+      font-size: 0.95rem;
+    }
+
+    .state-message.error { color: #e2001a; }
+
+    .timezone-note {
+      width: 100%;
+      max-width: 600px;
+      margin-top: 1.5rem;
+      background: #1a1a22;
+      border: 1px solid #2a2a38;
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      font-size: 0.82rem;
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .timezone-note strong { color: #aaa; }
+
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid #333;
+      border-top-color: #e2001a;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    footer {
+      margin-top: 3rem;
+      color: #444;
+      font-size: 0.78rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="tag">DR LYD</div>
+  <h1>Timeshift Radio</h1>
+  <p>Hear Danish radio on your time — the same show, just at your local hour.</p>
+</header>
+
+<div class="controls">
+  <select id="channel-select">
+    {% for ch in channels %}
+    <option value="{{ ch.slug }}">{{ ch.name }} — {{ ch.description }}</option>
+    {% endfor %}
+  </select>
+
+  <select id="tz-select">
+    <option value="America/Los_Angeles">Los Angeles (PST/PDT)</option>
+    <option value="America/New_York">New York (EST/EDT)</option>
+    <option value="America/Chicago">Chicago (CST/CDT)</option>
+    <option value="America/Denver">Denver (MST/MDT)</option>
+    <option value="Europe/London">London (GMT/BST)</option>
+    <option value="Europe/Berlin">Berlin (CET/CEST)</option>
+    <option value="America/Toronto">Toronto (EST/EDT)</option>
+    <option value="Australia/Sydney">Sydney (AEST/AEDT)</option>
+    <option value="Asia/Tokyo">Tokyo (JST)</option>
+  </select>
+</div>
+
+<div class="player-card">
+  <div class="now-playing-header">
+    <div class="live-dot"></div>
+    <span>Now playing</span>
+    <span class="time-display" id="clock"></span>
+  </div>
+
+  <div id="show-content">
+    <div class="state-message">
+      <span class="spinner"></span> Loading…
+    </div>
+  </div>
+
+  <div class="audio-bar" id="audio-bar" style="display:none">
+    <audio id="audio-player" controls preload="none"></audio>
+  </div>
+</div>
+
+<div class="timezone-note" id="tz-note"></div>
+
+<footer>Content from DR LYD · Time-shifted to match your local clock</footer>
+
+<script>
+  const channelSelect = document.getElementById('channel-select');
+  const tzSelect = document.getElementById('tz-select');
+  const showContent = document.getElementById('show-content');
+  const audioBar = document.getElementById('audio-bar');
+  const audioPlayer = document.getElementById('audio-player');
+  const tzNote = document.getElementById('tz-note');
+  const clock = document.getElementById('clock');
+
+  let refreshTimer = null;
+  let currentShowId = null;
+  let currentStreamUrl = null;
+
+  // Try to detect user's timezone
+  try {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const opt = tzSelect.querySelector(`option[value="${detected}"]`);
+    if (opt) opt.selected = true;
+  } catch(e) {}
+
+  function updateClock() {
+    const tz = tzSelect.value;
+    const now = new Date();
+    clock.textContent = now.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZone: tz, hour12: false
+    });
+  }
+
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  function imageUrl(imageAssets) {
+    const sq = imageAssets?.find(i => i.target === 'SquareImage');
+    const asset = sq || imageAssets?.[0];
+    if (!asset) return null;
+    // Full URN form: https://asset.dr.dk/drlyd/images/urn:dr:radio:image:{id}
+    return `https://asset.dr.dk/drlyd/images/${asset.id}?im=AspectCrop=(200,200),xPosition=.5,yPosition=.5;Resize=(200,200)`;
+  }
+
+  function formatTime(isoStr) {
+    if (!isoStr) return '';
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString('da-DK', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'Europe/Copenhagen'
+    });
+  }
+
+  async function load() {
+    const channel = channelSelect.value;
+    const tz = tzSelect.value;
+
+    showContent.innerHTML = `<div class="state-message"><span class="spinner"></span> Loading…</div>`;
+    audioBar.style.display = 'none';
+    tzNote.textContent = '';
+
+    let data;
+    try {
+      const res = await fetch(`/api/now?channel=${encodeURIComponent(channel)}&user_tz=${encodeURIComponent(tz)}`);
+      data = await res.json();
+    } catch(e) {
+      showContent.innerHTML = `<div class="state-message error">Network error. Retrying…</div>`;
+      return;
+    }
+
+    if (data.status === 'no_show') {
+      showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
+      return;
+    }
+
+    const show = data.show;
+    const sameShow = show.id === currentShowId;
+
+    // Update time context note
+    tzNote.innerHTML = `
+      <strong>How this works:</strong> Your local time is
+      <strong>${data.user.localTime}</strong> (${tz.split('/')[1]?.replace('_',' ') || tz}).
+      This plays what aired on <strong>DR ${channel.toUpperCase()}</strong>
+      at <strong>${data.target_cph_time}</strong> Copenhagen time
+      on <strong>${data.schedule_date}</strong>.
+    `;
+
+    const imgUrl = imageUrl(show.imageAssets);
+    const thumb = imgUrl
+      ? `<img class="show-thumb" src="${imgUrl}" alt="" onerror="this.style.display='none'">`
+      : `<div class="show-thumb-placeholder">📻</div>`;
+
+    const startFmt = formatTime(show.startTime);
+    const endFmt = formatTime(show.endTime);
+
+    const unavailableBadge = !show.isAvailableOnDemand
+      ? `<span class="unavailable-badge">Not available on demand</span>`
+      : '';
+
+    showContent.innerHTML = `
+      <div class="show-info">
+        ${thumb}
+        <div class="show-details">
+          <div class="show-title">${show.title || 'Unknown programme'}</div>
+          <div class="show-desc">${show.description || ''}</div>
+          <div class="show-time">${startFmt} – ${endFmt} Copenhagen time</div>
+          ${unavailableBadge}
+        </div>
+      </div>
+    `;
+
+    if (!show.isAvailableOnDemand) {
+      audioBar.style.display = 'none';
+      currentShowId = show.id;
+      return;
+    }
+
+    // Only reload audio if show changed
+    if (!sameShow) {
+      audioBar.style.display = 'block';
+      audioPlayer.src = '';
+      currentShowId = show.id;
+      currentStreamUrl = null;
+
+      // Resolve stream URL
+      try {
+        const sRes = await fetch(`/api/stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`);
+        const sData = await sRes.json();
+        currentStreamUrl = sData.url;
+        audioPlayer.src = currentStreamUrl;
+      } catch(e) {
+        audioBar.style.display = 'none';
+      }
+    }
+  }
+
+  // Refresh every 3 minutes to catch show changes
+  function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { load(); scheduleRefresh(); }, 3 * 60 * 1000);
+  }
+
+  channelSelect.addEventListener('change', () => { currentShowId = null; load(); scheduleRefresh(); });
+  tzSelect.addEventListener('change', () => { currentShowId = null; load(); scheduleRefresh(); });
+
+  load();
+  scheduleRefresh();
+</script>
+</body>
+</html>
