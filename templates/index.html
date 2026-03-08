@@ -384,9 +384,10 @@
     let data;
     try {
       const res = await fetch(`/api/now?channel=${encodeURIComponent(channel)}&user_tz=${encodeURIComponent(tz)}`);
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
       data = await res.json();
     } catch(e) {
-      showContent.innerHTML = `<div class="state-message error">Network error. Retrying…</div>`;
+      showContent.innerHTML = `<div class="state-message error">Could not load schedule. Retrying…</div>`;
       return;
     }
 
@@ -448,6 +449,15 @@
       // no raw CDN URL exposed to the browser (avoids 403 issues).
       audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
       audioPlayer.play().catch(() => {}); // best-effort; browser may block on very first visit
+
+      // Show a helpful message if the stream is unavailable (e.g. geo-restricted music channels)
+      audioPlayer.onerror = () => {
+        audioBar.style.display = 'none';
+        const note = document.createElement('div');
+        note.style.cssText = 'padding:0.8rem 1.5rem 1.2rem; color:#e2001a; font-size:0.85rem;';
+        note.textContent = '⚠️ Audio unavailable — this programme may be restricted outside Denmark.';
+        showContent.appendChild(note);
+      };
     }
   }
 

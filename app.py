@@ -22,9 +22,9 @@ DR_CHANNELS = [
     {"slug": "p3",       "name": "P3",         "description": "Pop & rock"},
     {"slug": "p4",       "name": "P4",         "description": "Regional radio"},
     {"slug": "p5",       "name": "P5",         "description": "Klassiske hits"},
-    {"slug": "p6-beat",  "name": "P6 Beat",    "description": "Alternativ musik"},
-    {"slug": "p7-mix",   "name": "P7 Mix",     "description": "Nostalgisk musik"},
-    {"slug": "p8-jazz",  "name": "P8 Jazz",    "description": "Jazz"},
+    {"slug": "p6beat",   "name": "P6 Beat",    "description": "Alternativ musik"},
+    {"slug": "p7mix",    "name": "P7 Mix",     "description": "Nostalgisk musik"},
+    {"slug": "p8jazz",   "name": "P8 Jazz",    "description": "Jazz"},
 ]
 
 COPENHAGEN_TZ = ZoneInfo("Europe/Copenhagen")
