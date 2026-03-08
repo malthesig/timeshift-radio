@@ -325,12 +325,24 @@
   let currentShowId = null;
   let currentStreamUrl = null;
 
-  // Try to detect user's timezone
-  try {
-    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const opt = tzSelect.querySelector(`option[value="${detected}"]`);
+  // Restore saved channel, then timezone (fall back to auto-detect for tz)
+  const savedChannel = localStorage.getItem('dr_channel');
+  if (savedChannel) {
+    const opt = channelSelect.querySelector(`option[value="${savedChannel}"]`);
     if (opt) opt.selected = true;
-  } catch(e) {}
+  }
+
+  const savedTz = localStorage.getItem('dr_tz');
+  if (savedTz) {
+    const opt = tzSelect.querySelector(`option[value="${savedTz}"]`);
+    if (opt) opt.selected = true;
+  } else {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const opt = tzSelect.querySelector(`option[value="${detected}"]`);
+      if (opt) opt.selected = true;
+    } catch(e) {}
+  }
 
   function updateClock() {
     const tz = tzSelect.value;
@@ -435,6 +447,7 @@
       // Point directly at the server-side proxy — no extra fetch needed,
       // no raw CDN URL exposed to the browser (avoids 403 issues).
       audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
+      audioPlayer.play().catch(() => {}); // best-effort; browser may block on very first visit
     }
   }
 
@@ -444,8 +457,14 @@
     refreshTimer = setTimeout(() => { load(); scheduleRefresh(); }, 3 * 60 * 1000);
   }
 
-  channelSelect.addEventListener('change', () => { currentShowId = null; load(); scheduleRefresh(); });
-  tzSelect.addEventListener('change', () => { currentShowId = null; load(); scheduleRefresh(); });
+  channelSelect.addEventListener('change', () => {
+    localStorage.setItem('dr_channel', channelSelect.value);
+    currentShowId = null; load(); scheduleRefresh();
+  });
+  tzSelect.addEventListener('change', () => {
+    localStorage.setItem('dr_tz', tzSelect.value);
+    currentShowId = null; load(); scheduleRefresh();
+  });
 
   load();
   scheduleRefresh();
