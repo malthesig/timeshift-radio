@@ -84,6 +84,18 @@ def find_next_show(items: list[dict], current_show: dict) -> Optional[dict]:
     return None
 
 
+def find_previous_show(items: list[dict], current_show: dict) -> Optional[dict]:
+    """Find the show immediately before the current one."""
+    current_start = datetime.fromisoformat(current_show["startTime"])
+    best = None
+    for item in items:
+        end = datetime.fromisoformat(item["endTime"])
+        if end <= current_start:
+            if best is None or datetime.fromisoformat(best["endTime"]) < end:
+                best = item
+    return best
+
+
 def wall_clock_as_copenhagen(user_dt: datetime) -> datetime:
     """
     Take the user's wall-clock time (H:MM) and return a datetime representing
@@ -101,21 +113,32 @@ async def index(request: Request):
 
 
 @app.get("/api/now")
-async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles"):
+async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles",
+                      at: Optional[str] = None):
     """
     Given a channel and user timezone, find what's 'now playing' using time-shift logic:
     play what aired in Copenhagen at the same wall-clock time as the user's current time.
+
+    Optional `at` parameter: a UTC ISO datetime string (e.g. "2026-03-08T19:03:00+00:00").
+    When provided, look up the show at that specific time instead of computing from the
+    user's current wall-clock time. Used for Prev/Next navigation.
     """
-    try:
-        tz = ZoneInfo(user_tz)
-    except Exception:
-        raise HTTPException(400, f"Unknown timezone: {user_tz}")
-
-    now_local = datetime.now(tz)
-
-    # Interpret the user's current wall-clock time as Copenhagen local time
-    target_cph = now_local.replace(tzinfo=COPENHAGEN_TZ)
-    target_utc = target_cph.astimezone(ZoneInfo("UTC"))
+    if at:
+        try:
+            target_utc = datetime.fromisoformat(at)
+            if target_utc.tzinfo is None:
+                target_utc = target_utc.replace(tzinfo=ZoneInfo("UTC"))
+        except ValueError:
+            raise HTTPException(400, f"Invalid 'at' parameter: {at}")
+        target_cph = target_utc.astimezone(COPENHAGEN_TZ)
+    else:
+        try:
+            tz = ZoneInfo(user_tz)
+        except Exception:
+            raise HTTPException(400, f"Unknown timezone: {user_tz}")
+        now_local = datetime.now(tz)
+        target_cph = now_local.replace(tzinfo=COPENHAGEN_TZ)
+        target_utc = target_cph.astimezone(ZoneInfo("UTC"))
 
     # Determine which date to fetch the schedule for (Copenhagen calendar date)
     schedule_date = target_cph.date()
@@ -158,6 +181,7 @@ async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles")
             "id": s.get("id"),
         }
 
+    prev_show = find_previous_show(items, show)
     next_show = find_next_show(items, show)
 
     return {
@@ -165,13 +189,15 @@ async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles")
         "channel": channel,
         "target_cph_time": target_cph.strftime("%H:%M"),
         "schedule_date": str(schedule_date),
+        "navigated": at is not None,
         "show": show_dict(show),
+        "previous_show": show_dict(prev_show) if prev_show else None,
         "next_show": show_dict(next_show) if next_show else None,
-        "user": {
+        "user": None if at else {
             "timezone": user_tz,
             "localTime": now_local.strftime("%H:%M"),
             "localDate": now_local.strftime("%Y-%m-%d"),
-        }
+        },
     }
 
 

@@ -254,6 +254,31 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    .nav-bar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem 1rem;
+      border-top: 1px solid #2a2a38;
+    }
+
+    .nav-btn {
+      flex: 1;
+      padding: 0.55rem 0.75rem;
+      background: transparent;
+      border: 1px solid #333;
+      color: #888;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .nav-btn:hover:not(:disabled) { border-color: #666; color: #ccc; }
+    .nav-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
     footer {
       margin-top: 3rem;
       color: #444;
@@ -306,6 +331,11 @@
   <div class="audio-bar" id="audio-bar" style="display:none">
     <audio id="audio-player" controls preload="none"></audio>
   </div>
+
+  <div class="nav-bar">
+    <button class="nav-btn" id="prev-btn" disabled>← Previous</button>
+    <button class="nav-btn" id="next-btn" disabled>Next →</button>
+  </div>
 </div>
 
 <div class="timezone-note" id="tz-note"></div>
@@ -314,16 +344,25 @@
 
 <script>
   const channelSelect = document.getElementById('channel-select');
-  const tzSelect = document.getElementById('tz-select');
-  const showContent = document.getElementById('show-content');
-  const audioBar = document.getElementById('audio-bar');
-  const audioPlayer = document.getElementById('audio-player');
-  const tzNote = document.getElementById('tz-note');
-  const clock = document.getElementById('clock');
+  const tzSelect     = document.getElementById('tz-select');
+  const showContent  = document.getElementById('show-content');
+  const audioBar     = document.getElementById('audio-bar');
+  const audioPlayer  = document.getElementById('audio-player');
+  const tzNote       = document.getElementById('tz-note');
+  const clock        = document.getElementById('clock');
+  const prevBtn      = document.getElementById('prev-btn');
+  const nextBtn      = document.getElementById('next-btn');
 
-  let refreshTimer = null;
+  let refreshTimer  = null;
   let currentShowId = null;
-  let currentStreamUrl = null;
+  let prevShowData  = null;   // show object for the ← button
+  let nextShowData  = null;   // show object for the → button
+
+  // Auto-advance to next show when episode finishes naturally
+  audioPlayer.addEventListener('ended', () => {
+    currentShowId = null;
+    load(true);
+  });
 
   // Restore saved channel, then timezone (fall back to auto-detect for tz)
   const savedChannel = localStorage.getItem('dr_channel');
@@ -331,7 +370,6 @@
     const opt = channelSelect.querySelector(`option[value="${savedChannel}"]`);
     if (opt) opt.selected = true;
   }
-
   const savedTz = localStorage.getItem('dr_tz');
   if (savedTz) {
     const opt = tzSelect.querySelector(`option[value="${savedTz}"]`);
@@ -352,7 +390,6 @@
       timeZone: tz, hour12: false
     });
   }
-
   setInterval(updateClock, 1000);
   updateClock();
 
@@ -360,65 +397,92 @@
     const sq = imageAssets?.find(i => i.target === 'SquareImage');
     const asset = sq || imageAssets?.[0];
     if (!asset) return null;
-    // Full URN form: https://asset.dr.dk/drlyd/images/urn:dr:radio:image:{id}
     return `https://asset.dr.dk/drlyd/images/${asset.id}?im=AspectCrop=(200,200),xPosition=.5,yPosition=.5;Resize=(200,200)`;
   }
 
   function formatTime(isoStr) {
     if (!isoStr) return '';
-    const d = new Date(isoStr);
-    return d.toLocaleTimeString('da-DK', {
-      hour: '2-digit', minute: '2-digit',
-      timeZone: 'Europe/Copenhagen'
+    return new Date(isoStr).toLocaleTimeString('da-DK', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Copenhagen'
     });
   }
 
-  async function load() {
+  function updateNavButtons() {
+    prevBtn.disabled = !prevShowData;
+    nextBtn.disabled = !nextShowData;
+    prevBtn.title = prevShowData
+      ? `${prevShowData.title} (${formatTime(prevShowData.startTime)})`  : '';
+    nextBtn.title = nextShowData
+      ? `${nextShowData.title} (${formatTime(nextShowData.startTime)})` : '';
+  }
+
+  // force=true      → initial load, channel/tz change, or nav button: always switch show
+  // force=false     → periodic background refresh: never interrupt ongoing playback
+  // targetTime      → UTC ISO string; when set, look up that specific show instead of "now"
+  async function load(force = false, targetTime = null) {
     const channel = channelSelect.value;
     const tz = tzSelect.value;
 
-    showContent.innerHTML = `<div class="state-message"><span class="spinner"></span> Loading…</div>`;
-    audioBar.style.display = 'none';
-    tzNote.textContent = '';
+    if (force) {
+      showContent.innerHTML = `<div class="state-message"><span class="spinner"></span> Loading…</div>`;
+      audioBar.style.display = 'none';
+      tzNote.textContent = '';
+    }
+
+    const params = new URLSearchParams({ channel, user_tz: tz });
+    if (targetTime) params.set('at', targetTime);
 
     let data;
     try {
-      const res = await fetch(`/api/now?channel=${encodeURIComponent(channel)}&user_tz=${encodeURIComponent(tz)}`);
+      const res = await fetch(`/api/now?${params}`);
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       data = await res.json();
     } catch(e) {
-      showContent.innerHTML = `<div class="state-message error">Could not load schedule. Retrying…</div>`;
+      if (force) showContent.innerHTML = `<div class="state-message error">Could not load schedule. Retrying…</div>`;
       return;
     }
 
     if (data.status === 'no_show') {
-      showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
+      if (force) showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
       return;
     }
 
     const show = data.show;
     const sameShow = show.id === currentShowId;
 
-    // Update time context note
-    tzNote.innerHTML = `
-      <strong>How this works:</strong> Your local time is
-      <strong>${data.user.localTime}</strong> (${tz.split('/')[1]?.replace('_',' ') || tz}).
-      This plays what aired on <strong>DR ${channel.toUpperCase()}</strong>
-      at <strong>${data.target_cph_time}</strong> Copenhagen time
-      on <strong>${data.schedule_date}</strong>.
-    `;
+    // Always update prev/next navigation state from the API response
+    prevShowData = data.previous_show || null;
+    nextShowData = data.next_show     || null;
+    updateNavButtons();
+
+    // Background refresh: don't interrupt playback if the clock crossed a show boundary
+    if (!sameShow && !force && currentShowId !== null) return;
+
+    // Update the context note
+    if (data.navigated) {
+      tzNote.innerHTML = `
+        <strong>Browsing schedule:</strong> Showing what aired on
+        <strong>DR ${channel.toUpperCase()}</strong> at
+        <strong>${data.target_cph_time}</strong> Copenhagen time
+        on <strong>${data.schedule_date}</strong>.
+      `;
+    } else if (data.user) {
+      tzNote.innerHTML = `
+        <strong>How this works:</strong> Your local time is
+        <strong>${data.user.localTime}</strong> (${tz.split('/')[1]?.replace('_',' ') || tz}).
+        This plays what aired on <strong>DR ${channel.toUpperCase()}</strong>
+        at <strong>${data.target_cph_time}</strong> Copenhagen time
+        on <strong>${data.schedule_date}</strong>.
+      `;
+    }
 
     const imgUrl = imageUrl(show.imageAssets);
     const thumb = imgUrl
       ? `<img class="show-thumb" src="${imgUrl}" alt="" onerror="this.style.display='none'">`
       : `<div class="show-thumb-placeholder">📻</div>`;
 
-    const startFmt = formatTime(show.startTime);
-    const endFmt = formatTime(show.endTime);
-
     const unavailableBadge = !show.isAvailableOnDemand
-      ? `<span class="unavailable-badge">Not available on demand</span>`
-      : '';
+      ? `<span class="unavailable-badge">Not available on demand</span>` : '';
 
     showContent.innerHTML = `
       <div class="show-info">
@@ -426,7 +490,7 @@
         <div class="show-details">
           <div class="show-title">${show.title || 'Unknown programme'}</div>
           <div class="show-desc">${show.description || ''}</div>
-          <div class="show-time">${startFmt} – ${endFmt} Copenhagen time</div>
+          <div class="show-time">${formatTime(show.startTime)} – ${formatTime(show.endTime)} Copenhagen time</div>
           ${unavailableBadge}
         </div>
       </div>
@@ -438,19 +502,16 @@
       return;
     }
 
-    // Only reload audio if show changed
     if (!sameShow) {
       currentShowId = show.id;
-      currentStreamUrl = null;
-      audioPlayer.src = '';
+
+      audioPlayer.onerror = null;
+      audioPlayer.pause();
+      audioPlayer.removeAttribute('src');
+      audioPlayer.load();
+
       audioBar.style.display = 'block';
 
-      // Point directly at the server-side proxy — no extra fetch needed,
-      // no raw CDN URL exposed to the browser (avoids 403 issues).
-      audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
-      audioPlayer.play().catch(() => {}); // best-effort; browser may block on very first visit
-
-      // Show a helpful message if the stream is unavailable (e.g. geo-restricted music channels)
       audioPlayer.onerror = () => {
         audioBar.style.display = 'none';
         const note = document.createElement('div');
@@ -458,25 +519,37 @@
         note.textContent = '⚠️ Audio unavailable — this programme may be restricted outside Denmark.';
         showContent.appendChild(note);
       };
+
+      audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
+      audioPlayer.play().catch(() => {});
     }
   }
 
-  // Refresh every 3 minutes to catch show changes
+  prevBtn.addEventListener('click', () => {
+    if (prevShowData) { currentShowId = null; load(true, prevShowData.startTime); }
+  });
+  nextBtn.addEventListener('click', () => {
+    if (nextShowData) { currentShowId = null; load(true, nextShowData.startTime); }
+  });
+
+  // Refresh every 3 minutes — background only, never interrupts playback
   function scheduleRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { load(); scheduleRefresh(); }, 3 * 60 * 1000);
+    refreshTimer = setTimeout(() => { load(false); scheduleRefresh(); }, 3 * 60 * 1000);
   }
 
   channelSelect.addEventListener('change', () => {
     localStorage.setItem('dr_channel', channelSelect.value);
-    currentShowId = null; load(); scheduleRefresh();
+    currentShowId = null; prevShowData = null; nextShowData = null;
+    load(true); scheduleRefresh();
   });
   tzSelect.addEventListener('change', () => {
     localStorage.setItem('dr_tz', tzSelect.value);
-    currentShowId = null; load(); scheduleRefresh();
+    currentShowId = null; prevShowData = null; nextShowData = null;
+    load(true); scheduleRefresh();
   });
 
-  load();
+  load(true);
   scheduleRefresh();
 </script>
 </body>
