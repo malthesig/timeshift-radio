@@ -520,6 +520,18 @@
         showContent.appendChild(note);
       };
 
+      // On initial timeshift load, jump to the correct point in the programme.
+      // e.g. tuning in at 9:33 when the show started at 9:03 → seek to 30 min in.
+      // Skip for manual navigation (data.navigated=true) — that always starts a show
+      // from its beginning.
+      const startOffset = (!data.navigated && (data.playback_offset_seconds || 0) > 2)
+        ? data.playback_offset_seconds : 0;
+      if (startOffset > 0) {
+        audioPlayer.addEventListener('loadedmetadata', () => {
+          audioPlayer.currentTime = startOffset;
+        }, { once: true });
+      }
+
       audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
       audioPlayer.play().catch(() => {});
     }

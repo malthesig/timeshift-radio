@@ -184,12 +184,20 @@ async def now_playing(channel: str = "p1", user_tz: str = "America/Los_Angeles",
     prev_show = find_previous_show(items, show)
     next_show = find_next_show(items, show)
 
+    # How many seconds into the show the listener should start.
+    # If the user's wall-clock is 22:33 and the show started at 22:03, this is 1800 s.
+    # When `at` is provided (manual navigation) the offset is always 0 because
+    # target_utc == show.startTime.
+    show_start = datetime.fromisoformat(show.get("startTime"))
+    playback_offset = max(0, int((target_utc - show_start).total_seconds()))
+
     return {
         "status": "ok",
         "channel": channel,
         "target_cph_time": target_cph.strftime("%H:%M"),
         "schedule_date": str(schedule_date),
         "navigated": at is not None,
+        "playback_offset_seconds": playback_offset,
         "show": show_dict(show),
         "previous_show": show_dict(prev_show) if prev_show else None,
         "next_show": show_dict(next_show) if next_show else None,
