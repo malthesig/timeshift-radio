@@ -98,6 +98,8 @@
       width: 8px; height: 8px;
       border-radius: 50%;
       background: #e2001a;
+    }
+    .live-dot.loading {
       animation: pulse 1.4s ease-in-out infinite;
     }
 
@@ -317,8 +319,8 @@
 
 <div class="player-card">
   <div class="now-playing-header">
-    <div class="live-dot"></div>
-    <span>Now playing</span>
+    <div class="live-dot" id="live-dot" style="display:none"></div>
+    <span id="now-playing-label" style="display:none"></span>
     <span class="time-display" id="clock"></span>
   </div>
 
@@ -353,10 +355,36 @@
   const prevBtn      = document.getElementById('prev-btn');
   const nextBtn      = document.getElementById('next-btn');
 
-  let refreshTimer  = null;
-  let currentShowId = null;
-  let prevShowData  = null;   // show object for the ← button
-  let nextShowData  = null;   // show object for the → button
+  let refreshTimer    = null;
+  let currentShowId   = null;
+  let prevShowData    = null;   // show object for the ← button
+  let nextShowData    = null;   // show object for the → button
+  let isFetching      = false;
+  let lastNavigated   = false;
+
+  const liveDot         = document.getElementById('live-dot');
+  const nowPlayingLabel = document.getElementById('now-playing-label');
+
+  function updateStatusHeader() {
+    if (isFetching) {
+      liveDot.style.display = '';
+      liveDot.classList.add('loading');
+      nowPlayingLabel.style.display = 'none';
+    } else if (!audioPlayer.paused && !audioPlayer.ended) {
+      liveDot.style.display = '';
+      liveDot.classList.remove('loading');
+      nowPlayingLabel.style.display = '';
+      nowPlayingLabel.textContent = lastNavigated ? 'Browsing schedule' : 'Now playing';
+    } else {
+      liveDot.style.display = 'none';
+      liveDot.classList.remove('loading');
+      nowPlayingLabel.style.display = 'none';
+    }
+  }
+
+  audioPlayer.addEventListener('play',   updateStatusHeader);
+  audioPlayer.addEventListener('pause',  updateStatusHeader);
+  audioPlayer.addEventListener('ended',  updateStatusHeader);
 
   // Auto-advance to next show when episode finishes naturally
   audioPlayer.addEventListener('ended', () => {
@@ -433,14 +461,20 @@
     if (targetTime) params.set('at', targetTime);
 
     let data;
+    isFetching = true; updateStatusHeader();
     try {
-      const res = await fetch(`/api/now?${params}`);
+      const ctrl = new AbortController();
+      const tId  = setTimeout(() => ctrl.abort(), 15000);
+      const res  = await fetch(`/api/now?${params}`, { signal: ctrl.signal });
+      clearTimeout(tId);
       if (!res.ok) throw new Error(`Server error ${res.status}`);
       data = await res.json();
     } catch(e) {
+      isFetching = false; updateStatusHeader();
       if (force) showContent.innerHTML = `<div class="state-message error">Could not load schedule. Retrying…</div>`;
       return;
     }
+    isFetching = false; lastNavigated = !!data.navigated; updateStatusHeader();
 
     if (data.status === 'no_show') {
       if (force) showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
@@ -559,6 +593,16 @@
     localStorage.setItem('dr_tz', tzSelect.value);
     currentShowId = null; prevShowData = null; nextShowData = null;
     load(true); scheduleRefresh();
+  });
+
+  // When the tab comes back into view after being hidden (e.g. hours later),
+  // reset the refresh timer and force a fresh load if audio has stopped.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    scheduleRefresh();   // reset the 3-min timer from now
+    const audioStopped = audioPlayer.paused || audioPlayer.ended || audioPlayer.readyState < 2;
+    if (audioStopped) { currentShowId = null; }
+    load(audioStopped);  // force=true resets UI; false=background refresh if still playing
   });
 
   load(true);
