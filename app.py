@@ -106,8 +106,7 @@ def wall_clock_as_copenhagen(user_dt: datetime) -> datetime:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "channels": DR_CHANNELS,
     })
 

@@ -386,10 +386,14 @@
   audioPlayer.addEventListener('pause',  updateStatusHeader);
   audioPlayer.addEventListener('ended',  updateStatusHeader);
 
-  // Auto-advance to next show when episode finishes naturally
+  // Auto-advance to next show when episode finishes naturally.
+  // Guard: only advance if the audio actually played for a meaningful duration,
+  // otherwise a failed load triggers an infinite reload loop.
   audioPlayer.addEventListener('ended', () => {
-    currentShowId = null;
-    load(true);
+    if (audioPlayer.currentTime > 1) {
+      currentShowId = null;
+      load(true);
+    }
   });
 
   // Restore saved channel, then timezone (fall back to auto-detect for tz)
@@ -567,7 +571,10 @@
       }
 
       audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
-      audioPlayer.play().catch(() => {});
+      audioPlayer.play().catch(() => {
+        // Autoplay blocked by browser — user needs to tap the native controls to start
+        updateStatusHeader();
+      });
     }
   }
 
