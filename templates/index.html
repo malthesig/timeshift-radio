@@ -361,18 +361,36 @@
   let nextShowData    = null;   // show object for the → button
   let isFetching      = false;
   let lastNavigated   = false;
+  let playingChannel  = null;   // slug of the channel that is actually streaming audio
+  let statusMessage   = null;   // custom status text (e.g. "Not available on demand")
 
   const liveDot         = document.getElementById('live-dot');
   const nowPlayingLabel = document.getElementById('now-playing-label');
 
-  function updateStatusHeader() {
+  function updateStatusHeader(msg) {
+    if (msg !== undefined) statusMessage = msg;
+
+    const audioIsPlaying = !audioPlayer.paused && !audioPlayer.ended;
+    const displayingPlayingChannel = playingChannel && channelSelect.value === playingChannel;
+
     if (isFetching) {
       liveDot.style.display = '';
       liveDot.classList.add('loading');
-      nowPlayingLabel.style.display = 'none';
-    } else if (!audioPlayer.paused && !audioPlayer.ended) {
+      liveDot.style.background = '';
+      nowPlayingLabel.style.display = '';
+      nowPlayingLabel.textContent = 'Loading…';
+    } else if (statusMessage) {
+      // Explicit status (e.g. "Not available on demand") always takes priority
       liveDot.style.display = '';
       liveDot.classList.remove('loading');
+      liveDot.style.background = '#666';
+      nowPlayingLabel.style.display = '';
+      nowPlayingLabel.textContent = statusMessage;
+    } else if (audioIsPlaying && displayingPlayingChannel) {
+      // Only show "Now playing" when viewing the channel that's actually streaming
+      liveDot.style.display = '';
+      liveDot.classList.remove('loading');
+      liveDot.style.background = '';
       nowPlayingLabel.style.display = '';
       nowPlayingLabel.textContent = lastNavigated ? 'Browsing schedule' : 'Now playing';
     } else {
@@ -382,14 +400,28 @@
     }
   }
 
-  audioPlayer.addEventListener('play',   updateStatusHeader);
-  audioPlayer.addEventListener('pause',  updateStatusHeader);
-  audioPlayer.addEventListener('ended',  updateStatusHeader);
+  function updateChannelIndicator() {
+    for (const opt of channelSelect.options) {
+      const name = opt.textContent.replace(/^▸ /, '');
+      opt.textContent = (playingChannel && opt.value === playingChannel ? '▸ ' : '') + name;
+    }
+  }
+
+  // 'playing' fires when audio data is actually flowing, not just when play() is called
+  audioPlayer.addEventListener('playing', () => {
+    playingChannel = channelSelect.value;
+    updateChannelIndicator();
+    // Only clear status if we're viewing the channel that just started playing
+    if (channelSelect.value === playingChannel) statusMessage = null;
+    updateStatusHeader();
+  });
+  audioPlayer.addEventListener('pause',  () => updateStatusHeader());
+  audioPlayer.addEventListener('ended',  () => updateStatusHeader());
 
   // Auto-advance to next show when episode finishes naturally.
-  // Guard: only advance if the audio actually played for a meaningful duration,
-  // otherwise a failed load triggers an infinite reload loop.
+  let suppressEndedEvent = false;
   audioPlayer.addEventListener('ended', () => {
+    if (suppressEndedEvent) { suppressEndedEvent = false; return; }
     if (audioPlayer.currentTime > 1) {
       currentShowId = null;
       load(true);
@@ -481,7 +513,10 @@
     isFetching = false; lastNavigated = !!data.navigated; updateStatusHeader();
 
     if (data.status === 'no_show') {
-      if (force) showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
+      if (force) {
+        showContent.innerHTML = `<div class="state-message">No programme scheduled at ${data.target_cph_time} on DR ${channel.toUpperCase()}.</div>`;
+        updateStatusHeader('No programme scheduled');
+      }
       return;
     }
 
@@ -535,8 +570,20 @@
     `;
 
     if (!show.isAvailableOnDemand) {
+      // Don't stop audio from another channel — it keeps playing in the background
       audioBar.style.display = 'none';
       currentShowId = show.id;
+      updateStatusHeader('Not available on demand');
+      return;
+    }
+
+    // If we're switching back to the channel that's already playing this show, just restore the UI
+    const alreadyPlaying = playingChannel === channel && show.id === currentShowId
+        && !audioPlayer.paused && !audioPlayer.ended;
+    if (alreadyPlaying) {
+      audioBar.style.display = 'block';
+      statusMessage = null;
+      updateStatusHeader();
       return;
     }
 
@@ -544,6 +591,7 @@
       currentShowId = show.id;
 
       audioPlayer.onerror = null;
+      suppressEndedEvent = true;
       audioPlayer.pause();
       audioPlayer.removeAttribute('src');
       audioPlayer.load();
@@ -552,6 +600,7 @@
 
       audioPlayer.onerror = () => {
         audioBar.style.display = 'none';
+        updateStatusHeader('Audio unavailable');
         const note = document.createElement('div');
         note.style.cssText = 'padding:0.8rem 1.5rem 1.2rem; color:#e2001a; font-size:0.85rem;';
         note.textContent = '⚠️ Audio unavailable — this programme may be restricted outside Denmark.';
@@ -571,9 +620,10 @@
       }
 
       audioPlayer.src = `/api/proxy-stream?presentation_url=${encodeURIComponent(show.presentationUrl)}`;
+      updateStatusHeader('Buffering…');
       audioPlayer.play().catch(() => {
         // Autoplay blocked by browser — user needs to tap the native controls to start
-        updateStatusHeader();
+        updateStatusHeader('Press play to start');
       });
     }
   }
@@ -593,8 +643,20 @@
 
   channelSelect.addEventListener('change', () => {
     localStorage.setItem('dr_channel', channelSelect.value);
-    currentShowId = null; prevShowData = null; nextShowData = null;
-    load(true); scheduleRefresh();
+    if (channelSelect.value === playingChannel
+        && !audioPlayer.paused && !audioPlayer.ended) {
+      // Switching back to the channel that's already playing — just restore UI
+      audioBar.style.display = 'block';
+      statusMessage = null;
+      updateStatusHeader();
+      // Still fetch schedule info in the background to update show details
+      load(false);
+    } else {
+      currentShowId = null; prevShowData = null; nextShowData = null;
+      statusMessage = null;
+      load(true);
+    }
+    scheduleRefresh();
   });
   tzSelect.addEventListener('change', () => {
     localStorage.setItem('dr_tz', tzSelect.value);
